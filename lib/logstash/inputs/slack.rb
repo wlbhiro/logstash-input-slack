@@ -90,7 +90,9 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
               JSON.parse(response)['messages'].each do |message|
                 # p message
                 event = LogStash::Event.new(message)
-                event.set("host", "slack-"+@channels[channel]+"-"+slack_replace(@users, @channels, message['user']))
+                event.set("userid", message['user'])
+                event.set("user", slack_replace(@users, @channels, message['user']))
+                event.set("host", "slack-"+@channels[channel]+"-"+event.get("user"))
                 event.set("channel", @channels[channel])
                 event.set("message", slack_replace(@users, @channels, message['text']))
                 event.set("message_raw", message['text'])
