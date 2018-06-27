@@ -33,7 +33,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
     get_channels_url = "https://slack.com/api/channels.list?token="+@token
     get_message_url = "https://slack.com/api/channels.history?count="+@count.to_s+"&token="+@token+"&channel="
     get_users_url = "https://slack.com/api/users.list?token="+@token
-    p get_channels_url
+    # p get_channels_url
     Stud.interval(@interval) do
       @logger.info('Polling Slack API')
 
@@ -92,7 +92,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
             else
               get_message_request_url += "&latest="+latest_time
             end
-            p get_message_request_url
+            # p get_message_request_url
             RestClient.get(
               get_message_request_url,
               :accept => "application/json",
@@ -103,7 +103,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
                 end
                 # p response
                 if JSON.parse(response)['messages'].size <= 0
-                  p "loop break"
+                  # p "loop break"
                   break
                 end
                 JSON.parse(response)['messages'].each do |message|
