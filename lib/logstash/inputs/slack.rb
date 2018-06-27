@@ -114,6 +114,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
                   end
 
                   event = LogStash::Event.new(message)
+                  decorate(event)
                   event.set("userid", message['user'])
                   event.set("user", hash_replace(@users, message['user']))
                   event.set("host", "slack-"+@channels[channel]+"-"+event.get("user"))
