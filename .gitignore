@@ -6,3 +6,5 @@ vendor
 lib/com
 lib/logstash-output-slack_jars.rb
 lib/org
+*.DS*
+**/.DS*

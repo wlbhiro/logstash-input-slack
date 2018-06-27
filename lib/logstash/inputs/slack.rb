@@ -1,6 +1,7 @@
 # encoding: utf-8
 require "logstash/inputs/base"
 require "logstash/namespace"
+require "logstash/timestamp"
 
 class LogStash::Inputs::Slack < LogStash::Inputs::Base
   config_name "slack"
@@ -11,7 +12,13 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
 
   # interval token
   config :interval, :validate => :number, :default => (60 * 15)
-  
+
+  # get messages count (MAX 1000 message. more messages use get all messages)
+  config :count, :validate => :number, :default => 1000
+
+  # get all messages (bulk size define is get messages count parameter)
+  config :getall, :validate => :boolean, :default => false
+
   public
   def register
     require 'rest-client'
@@ -24,7 +31,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
   public
   def run(queue)
     get_channels_url = "https://slack.com/api/channels.list?token="+@token
-    get_message_url = "https://slack.com/api/channels.history?count=1000&token="+@token+"&channel="
+    get_message_url = "https://slack.com/api/channels.history?count="+@count.to_s+"&token="+@token+"&channel="
     get_users_url = "https://slack.com/api/users.list?token="+@token
     p get_channels_url
     Stud.interval(@interval) do
@@ -50,7 +57,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
       rescue Exception => e
         @logger.warn("Unhandled exception", :exception => e,
                     :stacktrace => e.backtrace)
-      end
+      end # begin
 
       @channels = {}
       # GET CHANNEL LIST
@@ -72,40 +79,61 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
       rescue Exception => e
         @logger.warn("Unhandled exception", :exception => e,
                     :stacktrace => e.backtrace)
-      end
+      end # begin
 
       # GET MESSAGE CHANNELS
       @channels.keys.each do |channel|
+        latest_time = nil;
         begin
-          # p get_message_url+CGI.escape(channel)
-          RestClient.get(
-            get_message_url+CGI.escape(channel),
-            :accept => "application/json",
-            :'User-Agent' => "logstash-input-slack"
-            ) { |response, request, result, &block|
-              if response.code != 200
-                @logger.warn("Got a #{response.code} response: #{response}")
+          loop do
+            get_message_request_url = get_message_url+CGI.escape(channel)
+            if (latest_time.nil?)
+              latest_time = Time.now.to_f
+            else
+              get_message_request_url += "&latest="+latest_time
+            end
+            p get_message_request_url
+            RestClient.get(
+              get_message_request_url,
+              :accept => "application/json",
+              :'User-Agent' => "logstash-input-slack"
+              ) { |response, request, result, &block|
+                if response.code != 200
+                  @logger.warn("Got a #{response.code} response: #{response}")
+                end
+                # p response
+                if JSON.parse(response)['messages'].size <= 0
+                  p "loop break"
+                  break
+                end
+                JSON.parse(response)['messages'].each do |message|
+                  # p message
+                  # p LogStash::Timestamp.at(message['ts'].to_f)
+                  if latest_time > message['ts'].to_f
+                    latest_time = message['ts'].to_f # GET MIN TIME(for Next Request)
+                  end
+
+                  event = LogStash::Event.new(message)
+                  event.set("userid", message['user'])
+                  event.set("user", hash_replace(@users, message['user']))
+                  event.set("host", "slack-"+@channels[channel]+"-"+event.get("user"))
+                  event.set("channel", @channels[channel])
+                  event.set("message", slack_replace(@users, @channels, message['text']))
+                  event.set("message_raw", message['text'])
+                  event.set("@timestamp", LogStash::Timestamp.at(message['ts'].to_f))
+                  queue << event
+                end
+              }
+              if !@getall
+                break # ONCE EXECUTE
               end
-              # p response
-              JSON.parse(response)['messages'].each do |message|
-                # p message
-                event = LogStash::Event.new(message)
-                event.set("userid", message['user'])
-                event.set("user", slack_replace(@users, @channels, message['user']))
-                event.set("host", "slack-"+@channels[channel]+"-"+event.get("user"))
-                event.set("channel", @channels[channel])
-                event.set("message", slack_replace(@users, @channels, message['text']))
-                event.set("message_raw", message['text'])
-                event.set("slack_timestamp", message['ts'])
-                queue << event
-              end
-            }
+          end
         rescue Exception => e
           @logger.warn("Unhandled exception", :exception => e,
                       :stacktrace => e.backtrace)
-        end
-      end
-    end # loop
+        end # begin
+      end # for each
+    end # Stud.interval
   end # def run
 
   private
