@@ -115,10 +115,12 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
 
                   event = LogStash::Event.new(message)
                   decorate(event)
+
                   event.set("userid", message['user'])
                   event.set("user", hash_replace(@users, message['user']))
                   event.set("host", "slack-"+@channels[channel]+"-"+event.get("user"))
                   event.set("channel", @channels[channel])
+                  event.set("channelid", channel)
                   event.set("message", slack_replace(@users, @channels, message['text']))
                   event.set("message_raw", message['text'])
                   event.set("@timestamp", LogStash::Timestamp.at(message['ts'].to_f))
