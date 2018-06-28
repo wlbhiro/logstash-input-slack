@@ -13,6 +13,9 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
   # interval token
   config :interval, :validate => :number, :default => (60 * 15)
 
+  # get private channel
+  config :withprivate, :validate => :boolean, :default => true
+
   # get messages count (MAX 1000 message. more messages use get all messages)
   config :count, :validate => :number, :default => 1000
 
@@ -30,14 +33,16 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
 
   public
   def run(queue)
+    get_users_url = "https://slack.com/api/users.list?token="+@token
     get_channels_url = "https://slack.com/api/channels.list?token="+@token
     get_message_url = "https://slack.com/api/channels.history?count="+@count.to_s+"&token="+@token+"&channel="
-    get_users_url = "https://slack.com/api/users.list?token="+@token
+    get_private_channels_url = "https://slack.com/api/groups.list?token="+@token
+    get_private_message_url = "https://slack.com/api/groups.history?count="+@count.to_s+"&token="+@token+"&channel="
     # p get_channels_url
     Stud.interval(@interval) do
       @logger.info('Polling Slack API')
 
-      @users = {}
+      users = {}
       # GET USER LIST
       begin
         # p get_users_url
@@ -50,7 +55,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
               @logger.warn("Got a #{response.code} response: #{response}")
             end
             JSON.parse(response)['members'].each do |member|
-              @users[member['id']] = member['real_name']
+              users[member['id']] = member['real_name']
             end
             # p @users
           }
@@ -59,11 +64,13 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
                     :stacktrace => e.backtrace)
       end # begin
 
-      # GET CHANNEL LIST(PUBLIC CHANNEL)
-      @channels = get_channel_list(get_channels_url, channels)
+      # GET CHANNEL LIST & MESSAGE CHANNELS(PUBLIC CHANNEL)
+      send_message(queue, get_message_url, get_channel_list(get_channels_url, 'channels'), users)
 
-      # GET MESSAGE CHANNELS(PUBLIC CHANNEL)
-      send_message
+      # GET CHANNEL LIST & MESSAGE CHANNELS(PRIVATE CHANNEL)
+      if :withprivate
+        send_message(queue, get_private_message_url, get_channel_list(get_private_channels_url, 'groups'), users)
+      end
     end # Stud.interval
   end # def run
 
@@ -86,7 +93,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
   end
 
   private
-  def get_channel_list(get_channels_url) 
+  def get_channel_list(get_channels_url, extract_string) 
       channels = {}
       # GET CHANNEL LIST(PUBLIC CHANNEL)
       begin
@@ -99,7 +106,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
             if response.code != 200
               @logger.warn("Got a #{response.code} response: #{response}")
             end
-            JSON.parse(response)['channels'].each do |channel|
+            JSON.parse(response)[extract_string].each do |channel|
               channels[channel['id']] = channel['name']
             end
             # p @channels
@@ -112,7 +119,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
     end
 
     private
-    def send_message(get_message_request_url, channels)
+    def send_message(queue, get_message_url, channels, users)
       channels.keys.each do |channel|
         latest_time = nil;
         begin
@@ -147,12 +154,20 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
                   event = LogStash::Event.new(message)
                   decorate(event)
 
-                  event.set("userid", message['user'])
-                  event.set("user", hash_replace(@users, message['user']))
+                  if !(message['user'].nil?)
+                    event.set("userid", message['user'])
+                    event.set("user", hash_replace(users, message['user']))
+                  elsif !(message['username'.nil?])
+                    event.set("userid", message['username'])
+                    event.set("user", message['username'])
+                  else
+                    event.set("userid", "UNKNOWN")
+                    event.set("user", "UNKNOWN")
+                  end
                   # event.set("host", "slack-"+@channels[channel]+"-"+event.get("user"))
-                  event.set("channel", @channels[channel])
+                  event.set("channel", channels[channel])
                   event.set("channelid", channel)
-                  event.set("message", slack_replace(@users, @channels, message['text']))
+                  event.set("message", slack_replace(users, channels, message['text']))
                   event.set("message_raw", message['text'])
                   event.set("@timestamp", LogStash::Timestamp.at(message['ts'].to_f))
                   event.remove('text')
