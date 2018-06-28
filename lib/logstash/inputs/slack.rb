@@ -59,8 +59,36 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
                     :stacktrace => e.backtrace)
       end # begin
 
-      @channels = {}
-      # GET CHANNEL LIST
+      # GET CHANNEL LIST(PUBLIC CHANNEL)
+      @channels = get_channel_list(get_channels_url, channels)
+
+      # GET MESSAGE CHANNELS(PUBLIC CHANNEL)
+      send_message
+    end # Stud.interval
+  end # def run
+
+  private
+  def slack_replace(users, channels, text) 
+    return hash_replace(channels, hash_replace(users, text))
+  end
+
+  private
+  def hash_replace(hash, text) 
+    hash.keys.each do |key|
+      # p key
+      value = hash[key]
+      if value == nil
+        value = ""
+      end
+      text = text.gsub(key, value)
+    end
+    return text
+  end
+
+  private
+  def get_channel_list(get_channels_url) 
+      channels = {}
+      # GET CHANNEL LIST(PUBLIC CHANNEL)
       begin
         # p get_channels_url
         RestClient.get(
@@ -72,7 +100,7 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
               @logger.warn("Got a #{response.code} response: #{response}")
             end
             JSON.parse(response)['channels'].each do |channel|
-              @channels[channel['id']] = channel['name']
+              channels[channel['id']] = channel['name']
             end
             # p @channels
           }
@@ -80,9 +108,12 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
         @logger.warn("Unhandled exception", :exception => e,
                     :stacktrace => e.backtrace)
       end # begin
+      return channels
+    end
 
-      # GET MESSAGE CHANNELS
-      @channels.keys.each do |channel|
+    private
+    def send_message(get_message_request_url, channels)
+      channels.keys.each do |channel|
         latest_time = nil;
         begin
           loop do
@@ -137,24 +168,5 @@ class LogStash::Inputs::Slack < LogStash::Inputs::Base
                       :stacktrace => e.backtrace)
         end # begin
       end # for each
-    end # Stud.interval
-  end # def run
-
-  private
-  def slack_replace(users, channels, text) 
-    return hash_replace(channels, hash_replace(users, text))
-  end
-
-  private
-  def hash_replace(hash, text) 
-    hash.keys.each do |key|
-      # p key
-      value = hash[key]
-      if value == nil
-        value = ""
-      end
-      text = text.gsub(key, value)
     end
-    return text
-  end
 end # class LogStash::Inputs::Slack
